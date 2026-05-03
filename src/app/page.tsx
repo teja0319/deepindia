@@ -971,7 +971,7 @@ export default function WhatsAppSender() {
                         <tr key={i} style={{ borderBottom: '1px solid var(--card-border)' }}>
                           <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{camp.name}</td>
                           <td style={{ padding: '1.25rem 1.5rem' }}>
-                            <span className="badge">{camp.template_name}</span>
+                            <span className="badge">{camp.template}</span>
                           </td>
                           <td style={{ padding: '1.25rem 1.5rem' }}>
                             <div style={{ display: 'flex', gap: '1rem' }}>
@@ -980,7 +980,7 @@ export default function WhatsAppSender() {
                             </div>
                           </td>
                           <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
-                            {new Date(camp.created_at).toLocaleDateString()}
+                            {new Date(camp.date).toLocaleDateString()}
                           </td>
                           <td style={{ padding: '1.25rem 1.5rem' }}>
                             <button 
