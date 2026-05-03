@@ -6,7 +6,7 @@ import axios from 'axios';
 import { 
   Upload, CheckCircle, AlertCircle, Send, FileSpreadsheet, 
   List, ArrowRight, LayoutDashboard, PlusCircle, History, 
-  Users, MessageSquare, ExternalLink, Tag
+  Users, MessageSquare, ExternalLink, Tag, Edit, Trash2
 } from 'lucide-react';
 
 export default function WhatsAppSender() {
@@ -17,7 +17,15 @@ export default function WhatsAppSender() {
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   
   // Real Data States
-  const [stats, setStats] = useState({ totalSent: 0, campaigns: 0, deliveryRate: 0 });
+  const [stats, setStats] = useState({ 
+    totalSent: 0, 
+    totalFailed: 0, 
+    campaigns: 0, 
+    totalContacts: 0, 
+    deliveryRate: 0, 
+    topTemplates: [] as any[],
+    recentCampaigns: [] as any[] 
+  });
   const [campaignHistory, setCampaignHistory] = useState<any[]>([]);
   const [contactList, setContactList] = useState<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
@@ -64,6 +72,10 @@ export default function WhatsAppSender() {
   const [selectedCampaignLogs, setSelectedCampaignLogs] = useState<any[]>([]);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [viewingCampaign, setViewingCampaign] = useState<any>(null);
+
+  // Edit Contact State
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<any>(null);
 
   const fetchCampaignLogs = async (campaign: any) => {
     try {
@@ -131,6 +143,50 @@ export default function WhatsAppSender() {
       setView('contacts');
     } catch (err) {
       console.error('Import failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteContact = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this contact?')) return;
+    
+    try {
+      await axios.delete(`/api/contacts/${id}`);
+      setContactList(prev => prev.filter(c => c.id !== id));
+      setToast({ message: 'Contact deleted successfully', type: 'success' });
+    } catch (err) {
+      console.error('Delete failed');
+      setToast({ message: 'Failed to delete contact', type: 'error' });
+    }
+  };
+
+  const handleUpdateContact = async () => {
+    if (!editingContact) return;
+    
+    setIsLoading(true);
+    try {
+      const tags = typeof editingContact.tags === 'string' 
+        ? editingContact.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t)
+        : editingContact.tags;
+
+      await axios.patch(`/api/contacts/${editingContact.id}`, {
+        name: editingContact.name,
+        age: editingContact.age,
+        phone: editingContact.phone,
+        tags: tags
+      });
+      
+      // Update local state
+      setContactList(prev => prev.map(c => 
+        c.id === editingContact.id ? { ...editingContact, tags: tags } : c
+      ));
+      
+      setEditModalOpen(false);
+      setToast({ message: 'Contact updated successfully', type: 'success' });
+    } catch (err) {
+      console.error('Update failed');
+      setToast({ message: 'Failed to update contact', type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -387,6 +443,110 @@ export default function WhatsAppSender() {
                   </div>
                 </div>
               </div>
+              <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--purple)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Contacts</div>
+                    <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.totalContacts}</div>
+                  </div>
+                  <div style={{ background: 'var(--purple-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--purple)' }}>
+                    <Users size={22} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="grid" style={{ gridTemplateColumns: '1.5fr 1fr', gap: '2rem', marginTop: '2rem' }}>
+              <div className="glass-card">
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Top Templates Performance</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {stats.topTemplates.map((t, i) => (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                        <span style={{ fontWeight: 600 }}>{t.name.replace(/_/g, ' ')}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{t.usage_count} uses</span>
+                      </div>
+                      <div className="progress-bar-track" style={{ height: '8px' }}>
+                        <div 
+                          className="progress-bar-fill" 
+                          style={{ 
+                            width: `${(Number(t.success) / (Number(t.success) + Number(t.fail) || 1)) * 100}%`,
+                            background: 'var(--primary)'
+                          }}
+                        ></div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        <span>Success: {t.success}</span>
+                        <span>Failed: {t.fail}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {stats.topTemplates.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No template data yet</p>}
+                </div>
+              </div>
+
+              <div className="glass-card">
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Recent Campaigns Performance</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {stats.recentCampaigns.map((c, i) => (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                        <span style={{ fontWeight: 600 }}>{c.name}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{c.total} total</span>
+                      </div>
+                      <div className="progress-bar-track" style={{ height: '6px', background: '#fee2e2' }}>
+                        <div 
+                          className="progress-bar-fill" 
+                          style={{ 
+                            width: `${(Number(c.success) / (Number(c.total) || 1)) * 100}%`,
+                            background: 'var(--primary)'
+                          }}
+                        ></div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        <span>{Math.round((c.success / (c.total || 1)) * 100)}% Success</span>
+                        <span>{c.fail} failed</span>
+                      </div>
+                    </div>
+                  ))}
+                  {stats.recentCampaigns.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No campaign data yet</p>}
+                </div>
+              </div>
+
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', gridColumn: 'span 2' }}>
+                <div style={{ display: 'flex', gap: '4rem', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', width: '120px', height: '120px' }}>
+                    <svg viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
+                      <circle cx="18" cy="18" r="16" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+                      <circle 
+                        cx="18" cy="18" r="16" fill="none" stroke="var(--primary)" 
+                        strokeWidth="3" strokeDasharray={`${stats.deliveryRate}, 100`} 
+                      />
+                    </svg>
+                    <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '1.25rem', fontWeight: 800 }}>
+                      {stats.deliveryRate}%
+                    </div>
+                  </div>
+                  
+                  <div style={{ textAlign: 'left' }}>
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>Overall Success Rate</h3>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '300px', marginBottom: '1.5rem' }}>
+                      Aggregated performance across all templates and manual sends.
+                    </p>
+                    <div style={{ display: 'flex', gap: '2rem' }}>
+                      <div>
+                        <div style={{ color: 'var(--primary)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalSent}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Delivered</div>
+                      </div>
+                      <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                      <div>
+                        <div style={{ color: 'var(--error)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalFailed}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Failed</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             
             <div className="glass-card" style={{ marginTop: '2rem' }}>
@@ -454,7 +614,7 @@ export default function WhatsAppSender() {
                     <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <LayoutDashboard size={20} color="var(--primary)" /> 1. Name your Campaign
                     </h2>
-                    <div className="mapping-row" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+                    <div className="" style={{ border: 'none', background: 'transparent', padding: 0 }}>
                       <label style={{ fontSize: '0.9rem', marginBottom: '0.5rem', display: 'block', fontWeight: 700 }}>
                         Campaign Name <span style={{ color: 'var(--error)' }}>*</span>
                       </label>
@@ -956,6 +1116,7 @@ export default function WhatsAppSender() {
                     <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Phone</th>
                     <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Tags</th>
                     <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Joined</th>
+                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -974,6 +1135,27 @@ export default function WhatsAppSender() {
                       </td>
                       <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
                         {new Date(contact.joined).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '1.25rem 1.5rem' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button 
+                            className="btn-outline" 
+                            style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }}
+                            onClick={() => {
+                              setEditingContact({ ...contact, tags: contact.tags.join(', ') });
+                              setEditModalOpen(true);
+                            }}
+                          >
+                            <Edit size={14} color="#64748b" />
+                          </button>
+                          <button 
+                            className="btn-outline" 
+                            style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #fee2e2' }}
+                            onClick={() => handleDeleteContact(contact.id)}
+                          >
+                            <Trash2 size={14} color="#ef4444" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1049,6 +1231,81 @@ export default function WhatsAppSender() {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        )}
+
+
+        {/* EDIT CONTACT MODAL */}
+        {editModalOpen && editingContact && (
+          <div className="modal-overlay">
+            <div className="glass-card" style={{ width: '100%', maxWidth: '480px', animation: 'fadeIn 0.2s ease-out' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.25rem' }}>Edit Contact</h2>
+                <button onClick={() => setEditModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+              </div>
+              
+              <div style={{ display: 'grid', gap: '1.25rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Full Name</label>
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      type="text" 
+                      value={editingContact.name || ''} 
+                      onChange={(e) => setEditingContact({...editingContact, name: e.target.value})}
+                      placeholder="Contact Name"
+                      style={{ paddingLeft: '2.5rem' }}
+                    />
+                    <Users size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  </div>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Phone Number</label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type="text" 
+                        value={editingContact.phone || ''} 
+                        onChange={(e) => setEditingContact({...editingContact, phone: e.target.value})}
+                        placeholder="Phone"
+                        style={{ paddingLeft: '2.5rem' }}
+                      />
+                      <MessageSquare size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Age</label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type="number" 
+                        value={editingContact.age || ''} 
+                        onChange={(e) => setEditingContact({...editingContact, age: e.target.value})}
+                        placeholder="Age"
+                        style={{ paddingLeft: '2.5rem' }}
+                      />
+                      <Tag size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Tags (comma separated)</label>
+                  <input 
+                    type="text" 
+                    value={editingContact.tags || ''} 
+                    onChange={(e) => setEditingContact({...editingContact, tags: e.target.value})}
+                    placeholder="e.g. Patient, VIP, 2024"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+                <button className="btn-outline" style={{ flex: 1 }} onClick={() => setEditModalOpen(false)}>Cancel</button>
+                <button className="btn-primary" style={{ flex: 2 }} onClick={handleUpdateContact} disabled={isLoading}>
+                  {isLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </div>
           </div>
         )}
