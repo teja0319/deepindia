@@ -30,6 +30,7 @@ export default function WhatsAppSender() {
   const [contactList, setContactList] = useState<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
@@ -204,38 +205,42 @@ export default function WhatsAppSender() {
   const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
 
   useEffect(() => {
-    const fetchTemplates = async () => {
+    const initFetch = async () => {
+      setIsDataLoading(true);
       try {
-        const response = await axios.get('/api/templates');
-        setTemplates(response.data);
-      } catch (err) {
-        console.error('Failed to fetch templates');
-      }
-    };
-
-    const fetchAllData = async () => {
-      setIsLoading(true);
-      try {
-        const [statsRes, historyRes, contactsRes, logsRes] = await Promise.all([
+        const [statsRes, historyRes, contactsRes, logsRes, templatesRes] = await Promise.all([
           axios.get('/api/stats'),
           axios.get('/api/campaigns'),
           axios.get('/api/contacts'),
-          axios.get('/api/logs/recent')
+          axios.get('/api/logs/recent'),
+          axios.get('/api/templates')
         ]);
         setStats(statsRes.data);
         setCampaignHistory(historyRes.data);
         setContactList(contactsRes.data);
         setRecentLogs(logsRes.data);
+        setTemplates(templatesRes.data);
       } catch (err) {
-        console.error('Failed to fetch real-time data');
+        console.error('Failed to fetch data');
       } finally {
-        setIsLoading(false);
+        setIsDataLoading(false);
       }
     };
+    initFetch();
+  }, [view]);
 
-    fetchTemplates();
-    fetchAllData();
-  }, [view]); // Refetch whenever view changes
+  const Skeleton = ({ type }: { type: 'card' | 'title' | 'text' | 'table' | 'chart' }) => {
+    if (type === 'card') return <div className="skeleton" style={{ height: '120px', borderRadius: 'var(--radius-xl)' }}></div>;
+    if (type === 'title') return <div className="skeleton" style={{ height: '1.75rem', width: '200px', marginBottom: '1rem' }}></div>;
+    if (type === 'text') return <div className="skeleton" style={{ height: '1rem', width: '100%', marginBottom: '0.5rem' }}></div>;
+    if (type === 'chart') return <div className="skeleton" style={{ height: '300px', borderRadius: 'var(--radius-xl)' }}></div>;
+    if (type === 'table') return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {[1,2,3,4,5].map(i => <div key={i} className="skeleton" style={{ height: '3rem', width: '100%' }}></div>)}
+      </div>
+    );
+    return null;
+  };
 
   const [uploadFileName, setUploadFileName] = useState('');
 
@@ -408,145 +413,167 @@ export default function WhatsAppSender() {
       <main className="main-content">
         {view === 'dashboard' && (
           <div className="fade-in">
-            <h1>Dashboard Overview<span className="subtitle">Monitor your messaging activity and campaign performance</span></h1>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', marginTop: '1.5rem' }}>
-              <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--primary)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Sent</div>
-                    <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.totalSent}</div>
+            {isDataLoading ? <Skeleton type="title" /> : (
+              <h1>Dashboard Overview<span className="subtitle">Monitor your messaging activity and campaign performance</span></h1>
+            )}
+            <div className="grid" style={{ gridTemplateColumns: isDataLoading ? 'repeat(4, 1fr)' : 'repeat(4, 1fr)', gap: '1.25rem', marginTop: '1.5rem' }}>
+              {isDataLoading ? (
+                <>
+                  <Skeleton type="card" />
+                  <Skeleton type="card" />
+                  <Skeleton type="card" />
+                  <Skeleton type="card" />
+                </>
+              ) : (
+                <>
+                  <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--primary)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Sent</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.totalSent}</div>
+                      </div>
+                      <div style={{ background: 'var(--primary-dim)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--primary)' }}>
+                        <Send size={22} />
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ background: 'var(--primary-dim)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--primary)' }}>
-                    <Send size={22} />
+                  <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--info)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Campaigns</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.campaigns}</div>
+                      </div>
+                      <div style={{ background: 'var(--info-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--info)' }}>
+                        <History size={22} />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--info)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Campaigns</div>
-                    <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.campaigns}</div>
+                  <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--warning)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Delivery Rate</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.deliveryRate}%</div>
+                      </div>
+                      <div style={{ background: 'var(--warning-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--warning)' }}>
+                        <CheckCircle size={22} />
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ background: 'var(--info-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--info)' }}>
-                    <History size={22} />
+                  <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--purple)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Contacts</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.totalContacts}</div>
+                      </div>
+                      <div style={{ background: 'var(--purple-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--purple)' }}>
+                        <Users size={22} />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--warning)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Delivery Rate</div>
-                    <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.deliveryRate}%</div>
-                  </div>
-                  <div style={{ background: 'var(--warning-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--warning)' }}>
-                    <CheckCircle size={22} />
-                  </div>
-                </div>
-              </div>
-              <div className="glass-card stat-card" style={{ padding: '1.5rem', borderLeft: '3px solid var(--purple)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Contacts</div>
-                    <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>{stats.totalContacts}</div>
-                  </div>
-                  <div style={{ background: 'var(--purple-bg)', padding: '0.65rem', borderRadius: 'var(--radius-md)', color: 'var(--purple)' }}>
-                    <Users size={22} />
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
             
-            <div className="grid" style={{ gridTemplateColumns: '1.5fr 1fr', gap: '2rem', marginTop: '2rem' }}>
-              <div className="glass-card">
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Top Templates Performance</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  {stats.topTemplates.map((t, i) => (
-                    <div key={i}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                        <span style={{ fontWeight: 600 }}>{t.name.replace(/_/g, ' ')}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>{t.usage_count} uses</span>
-                      </div>
-                      <div className="progress-bar-track" style={{ height: '8px' }}>
-                        <div 
-                          className="progress-bar-fill" 
-                          style={{ 
-                            width: `${(Number(t.success) / (Number(t.success) + Number(t.fail) || 1)) * 100}%`,
-                            background: 'var(--primary)'
-                          }}
-                        ></div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        <span>Success: {t.success}</span>
-                        <span>Failed: {t.fail}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {stats.topTemplates.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No template data yet</p>}
-                </div>
-              </div>
-
-              <div className="glass-card">
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Recent Campaigns Performance</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  {stats.recentCampaigns.map((c, i) => (
-                    <div key={i}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                        <span style={{ fontWeight: 600 }}>{c.name}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>{c.total} total</span>
-                      </div>
-                      <div className="progress-bar-track" style={{ height: '6px', background: '#fee2e2' }}>
-                        <div 
-                          className="progress-bar-fill" 
-                          style={{ 
-                            width: `${(Number(c.success) / (Number(c.total) || 1)) * 100}%`,
-                            background: 'var(--primary)'
-                          }}
-                        ></div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                        <span>{Math.round((c.success / (c.total || 1)) * 100)}% Success</span>
-                        <span>{c.fail} failed</span>
-                      </div>
-                    </div>
-                  ))}
-                  {stats.recentCampaigns.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No campaign data yet</p>}
-                </div>
-              </div>
-
-              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', gridColumn: 'span 2' }}>
-                <div style={{ display: 'flex', gap: '4rem', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', width: '120px', height: '120px' }}>
-                    <svg viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
-                      <circle cx="18" cy="18" r="16" fill="none" stroke="#f1f5f9" strokeWidth="3" />
-                      <circle 
-                        cx="18" cy="18" r="16" fill="none" stroke="var(--primary)" 
-                        strokeWidth="3" strokeDasharray={`${stats.deliveryRate}, 100`} 
-                      />
-                    </svg>
-                    <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '1.25rem', fontWeight: 800 }}>
-                      {stats.deliveryRate}%
+            <div className="grid" style={{ gridTemplateColumns: isDataLoading ? '1fr' : '1.5fr 1fr', gap: '2rem', marginTop: '2rem' }}>
+              {isDataLoading ? (
+                <>
+                  <Skeleton type="chart" />
+                  <Skeleton type="chart" />
+                </>
+              ) : (
+                <>
+                  <div className="glass-card">
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Top Templates Performance</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      {stats.topTemplates.map((t, i) => (
+                        <div key={i}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                            <span style={{ fontWeight: 600 }}>{t.name.replace(/_/g, ' ')}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{t.usage_count} uses</span>
+                          </div>
+                          <div className="progress-bar-track" style={{ height: '8px' }}>
+                            <div 
+                              className="progress-bar-fill" 
+                              style={{ 
+                                width: `${(Number(t.success) / (Number(t.success) + Number(t.fail) || 1)) * 100}%`,
+                                background: 'var(--primary)'
+                              }}
+                            ></div>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            <span>Success: {t.success}</span>
+                            <span>Failed: {t.fail}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {stats.topTemplates.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No template data yet</p>}
                     </div>
                   </div>
-                  
-                  <div style={{ textAlign: 'left' }}>
-                    <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>Overall Success Rate</h3>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '300px', marginBottom: '1.5rem' }}>
-                      Aggregated performance across all templates and manual sends.
-                    </p>
-                    <div style={{ display: 'flex', gap: '2rem' }}>
-                      <div>
-                        <div style={{ color: 'var(--primary)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalSent}</div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Delivered</div>
+
+                  <div className="glass-card">
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: '1.5rem' }}>Recent Campaigns Performance</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      {stats.recentCampaigns.map((c, i) => (
+                        <div key={i}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                            <span style={{ fontWeight: 600 }}>{c.name}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{c.total} total</span>
+                          </div>
+                          <div className="progress-bar-track" style={{ height: '6px', background: '#fee2e2' }}>
+                            <div 
+                              className="progress-bar-fill" 
+                              style={{ 
+                                width: `${(Number(c.success) / (Number(c.total) || 1)) * 100}%`,
+                                background: 'var(--primary)'
+                              }}
+                            ></div>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                            <span>{Math.round((c.success / (c.total || 1)) * 100)}% Success</span>
+                            <span>{c.fail} failed</span>
+                          </div>
+                        </div>
+                      ))}
+                      {stats.recentCampaigns.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem' }}>No campaign data yet</p>}
+                    </div>
+                  </div>
+
+                  <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', gridColumn: 'span 2' }}>
+                    <div style={{ display: 'flex', gap: '4rem', alignItems: 'center' }}>
+                      <div style={{ position: 'relative', width: '120px', height: '120px' }}>
+                        <svg viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
+                          <circle cx="18" cy="18" r="16" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+                          <circle 
+                            cx="18" cy="18" r="16" fill="none" stroke="var(--primary)" 
+                            strokeWidth="3" strokeDasharray={`${stats.deliveryRate}, 100`} 
+                          />
+                        </svg>
+                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '1.25rem', fontWeight: 800 }}>
+                          {stats.deliveryRate}%
+                        </div>
                       </div>
-                      <div style={{ width: '1px', background: '#e2e8f0' }}></div>
-                      <div>
-                        <div style={{ color: 'var(--error)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalFailed}</div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Failed</div>
+                      
+                      <div style={{ textAlign: 'left' }}>
+                        <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>Overall Success Rate</h3>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '300px', marginBottom: '1.5rem' }}>
+                          Aggregated performance across all templates and manual sends.
+                        </p>
+                        <div style={{ display: 'flex', gap: '2rem' }}>
+                          <div>
+                            <div style={{ color: 'var(--primary)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalSent}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Delivered</div>
+                          </div>
+                          <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                          <div>
+                            <div style={{ color: 'var(--error)', fontSize: '1.5rem', fontWeight: 800 }}>{stats.totalFailed}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Failed</div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
             
             <div className="glass-card" style={{ marginTop: '2rem' }}>
@@ -554,45 +581,47 @@ export default function WhatsAppSender() {
                 <h3 style={{ fontSize: '1.1rem' }}>Recent Activity</h3>
                 <button className="btn-outline" style={{ padding: '0.45rem 1rem', fontSize: '0.8rem' }} onClick={() => setView('history')}>View All</button>
               </div>
-              <div style={{ overflow: 'hidden', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)' }}>
-                <table style={{ width: '100%' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--card-border)', background: 'var(--bg-surface)' }}>
-                      <th style={{ padding: '0.85rem 1.25rem' }}>Phone Number</th>
-                      <th style={{ padding: '0.85rem 1.25rem' }}>Campaign</th>
-                      <th style={{ padding: '0.85rem 1.25rem' }}>Status</th>
-                      <th style={{ padding: '0.85rem 1.25rem' }}>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentLogs.map((log, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                        <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600, color: 'var(--text-main)' }}>{log.phone_number}</td>
-                        <td style={{ padding: '0.85rem 1.25rem' }}>{log.campaign_name || 'Individual'}</td>
-                        <td style={{ padding: '0.85rem 1.25rem' }}>
-                          <span className={`badge ${log.status === 'success' ? 'badge-success' : 'badge-error'}`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.85rem 1.25rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                          {new Date(log.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </td>
+              {isDataLoading ? <Skeleton type="table" /> : (
+                <div style={{ overflow: 'hidden', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)' }}>
+                  <table style={{ width: '100%' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--card-border)', background: 'var(--bg-surface)' }}>
+                        <th style={{ padding: '0.85rem 1.25rem' }}>Phone Number</th>
+                        <th style={{ padding: '0.85rem 1.25rem' }}>Campaign</th>
+                        <th style={{ padding: '0.85rem 1.25rem' }}>Status</th>
+                        <th style={{ padding: '0.85rem 1.25rem' }}>Time</th>
                       </tr>
-                    ))}
-                    {recentLogs.length === 0 && (
-                      <tr>
-                        <td colSpan={4} style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
-                          <div style={{ background: 'var(--bg-elevated)', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
-                            <List size={28} opacity={0.3} />
-                          </div>
-                          <p style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>No activity logs yet</p>
-                          <p style={{ fontSize: '0.85rem' }}>Your campaign logs will appear here once you start sending messages.</p>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {recentLogs.map((log, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--card-border)' }}>
+                          <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600, color: 'var(--text-main)' }}>{log.phone_number}</td>
+                          <td style={{ padding: '0.85rem 1.25rem' }}>{log.campaign_name || 'Individual'}</td>
+                          <td style={{ padding: '0.85rem 1.25rem' }}>
+                            <span className={`badge ${log.status === 'success' ? 'badge-success' : 'badge-error'}`}>
+                              {log.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.85rem 1.25rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                            {new Date(log.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                        </tr>
+                      ))}
+                      {recentLogs.length === 0 && (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
+                            <div style={{ background: 'var(--bg-elevated)', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
+                              <List size={28} opacity={0.3} />
+                            </div>
+                            <p style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>No activity logs yet</p>
+                            <p style={{ fontSize: '0.85rem' }}>Your campaign logs will appear here once you start sending messages.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -636,27 +665,37 @@ export default function WhatsAppSender() {
                     <p style={{ color: 'var(--text-muted)' }}>Select the WhatsApp template you want to use for this campaign.</p>
                   </div>
                   <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
-                    {templates.map((t) => (
-                      <div 
-                        key={t.name} 
-                        className={`glass-card template-card ${selectedTemplate?.name === t.name ? 'active-border' : ''}`}
-                        style={{ cursor: 'pointer', padding: '1.5rem', border: selectedTemplate?.name === t.name ? '2px solid var(--primary)' : '1px solid var(--card-border)' }}
-                        onClick={() => setSelectedTemplate(t)}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                          <span className="badge badge-success">{t.category}</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.language}</span>
-                        </div>
-                        <h3 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t.name.replace(/_/g, ' ')}</h3>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {t.components.find((c: any) => c.type === 'BODY')?.text}
-                        </p>
-                      </div>
-                    ))}
-                    {templates.length === 0 && (
-                      <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', background: '#f8fafc', borderRadius: '1.5rem', border: '1px dashed var(--card-border)' }}>
-                        <p style={{ color: 'var(--text-muted)' }}>No templates found. Check your WhatsApp Business account.</p>
-                      </div>
+                    {isDataLoading ? (
+                      <>
+                        <Skeleton type="card" />
+                        <Skeleton type="card" />
+                        <Skeleton type="card" />
+                      </>
+                    ) : (
+                      <>
+                        {templates.map((t) => (
+                          <div 
+                            key={t.name} 
+                            className={`glass-card template-card ${selectedTemplate?.name === t.name ? 'active-border' : ''}`}
+                            style={{ cursor: 'pointer', padding: '1.5rem', border: selectedTemplate?.name === t.name ? '2px solid var(--primary)' : '1px solid var(--card-border)' }}
+                            onClick={() => setSelectedTemplate(t)}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                              <span className="badge badge-success">{t.category}</span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.language}</span>
+                            </div>
+                            <h3 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t.name.replace(/_/g, ' ')}</h3>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {t.components.find((c: any) => c.type === 'BODY')?.text}
+                            </p>
+                          </div>
+                        ))}
+                        {templates.length === 0 && (
+                          <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', background: '#f8fafc', borderRadius: '1.5rem', border: '1px dashed var(--card-border)' }}>
+                            <p style={{ color: 'var(--text-muted)' }}>No templates found. Check your WhatsApp Business account.</p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   {selectedTemplate && (
@@ -727,33 +766,35 @@ export default function WhatsAppSender() {
                       </div>
 
                       <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '1rem' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <tbody style={{ background: 'white' }}>
-                            {contactList
-                              .filter(c => selectedTagForCampaign === 'All Tags' || c.tags.includes(selectedTagForCampaign))
-                              .map(contact => (
-                              <tr key={contact.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '1rem' }}>
-                                  <input 
-                                    type="checkbox" 
-                                    checked={selectedContactIds.includes(contact.id)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) setSelectedContactIds(prev => [...prev, contact.id]);
-                                      else setSelectedContactIds(prev => prev.filter(id => id !== contact.id));
-                                    }}
-                                  />
-                                </td>
-                                <td style={{ padding: '1rem', fontWeight: 600 }}>{contact.name || 'Anonymous'}</td>
-                                <td style={{ padding: '1rem' }}>{contact.phone}</td>
-                                <td style={{ padding: '1rem' }}>
-                                  <div style={{ display: 'flex', gap: '0.25rem' }}>
-                                    {contact.tags.slice(0, 2).map((t: string) => <span key={t} className="badge" style={{ fontSize: '0.6rem', padding: '0.1rem 0.4rem' }}>{t}</span>)}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        {isDataLoading ? <Skeleton type="table" /> : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody style={{ background: 'white' }}>
+                              {contactList
+                                .filter(c => selectedTagForCampaign === 'All Tags' || c.tags.includes(selectedTagForCampaign))
+                                .map(contact => (
+                                <tr key={contact.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '1rem' }}>
+                                    <input 
+                                      type="checkbox" 
+                                      checked={selectedContactIds.includes(contact.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) setSelectedContactIds(prev => [...prev, contact.id]);
+                                        else setSelectedContactIds(prev => prev.filter(id => id !== contact.id));
+                                      }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '1rem', fontWeight: 600 }}>{contact.name || 'Anonymous'}</td>
+                                  <td style={{ padding: '1rem' }}>{contact.phone}</td>
+                                  <td style={{ padding: '1rem' }}>
+                                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                                      {contact.tags.slice(0, 2).map((t: string) => <span key={t} className="badge" style={{ fontSize: '0.6rem', padding: '0.1rem 0.4rem' }}>{t}</span>)}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
                       </div>
                       
                       <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
@@ -912,52 +953,57 @@ export default function WhatsAppSender() {
         {view === 'history' && (
           <div className="fade-in">
             <h1>Campaign History<span className="subtitle">Track and review all your past campaigns</span></h1>
-            <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--card-border)' }}>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Campaign Name</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Template</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stats</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedHistory.map((camp) => (
-                    <tr 
-                      key={camp.id} 
-                      style={{ borderBottom: '1px solid var(--card-border)', cursor: 'pointer' }}
-                      onClick={() => fetchCampaignLogs(camp)}
-                    >
-                      <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{camp.name}</td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>{camp.template}</td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{camp.success_count}</span>
-                          <span style={{ color: '#94a3b8' }}>/</span>
-                          <span style={{ color: 'var(--error)', fontWeight: 700 }}>{camp.fail_count}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <span className="badge badge-success">Completed</span>
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
-                        {new Date(camp.date).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={{ padding: '1rem 1.5rem', background: 'var(--bg-elevated)', borderTop: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                  Showing {Math.min((historyPage - 1) * itemsPerPage + 1, campaignHistory.length)} to {Math.min(historyPage * itemsPerPage, campaignHistory.length)} of {campaignHistory.length}
-                </span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} disabled={historyPage === 1} onClick={() => setHistoryPage(p => p - 1)}>Previous</button>
-                  <button className="btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} disabled={historyPage * itemsPerPage >= campaignHistory.length} onClick={() => setHistoryPage(p => p + 1)}>Next</button>
+            <div className="glass-card">
+              {isDataLoading ? <Skeleton type="table" /> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--card-border)' }}>
+                        <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Campaign Name</th>
+                        <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Template</th>
+                        <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Stats</th>
+                        <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Date</th>
+                        <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Logs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {campaignHistory.map((camp, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--card-border)' }}>
+                          <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{camp.name}</td>
+                          <td style={{ padding: '1.25rem 1.5rem' }}>
+                            <span className="badge">{camp.template_name}</span>
+                          </td>
+                          <td style={{ padding: '1.25rem 1.5rem' }}>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                              <div style={{ color: 'var(--success)', fontSize: '0.85rem' }}><b>{camp.success_count}</b> ✓</div>
+                              <div style={{ color: 'var(--error)', fontSize: '0.85rem' }}><b>{camp.fail_count}</b> ✕</div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
+                            {new Date(camp.created_at).toLocaleDateString()}
+                          </td>
+                          <td style={{ padding: '1.25rem 1.5rem' }}>
+                            <button 
+                              className="btn-outline" 
+                              style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
+                              onClick={() => fetchCampaignLogs(camp)}
+                            >
+                              Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {campaignHistory.length === 0 && (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-faint)' }}>
+                            No campaigns found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -1076,91 +1122,81 @@ export default function WhatsAppSender() {
 
         {view === 'contacts' && (
           <div className="fade-in">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem' }}>
-              <div>
-                <h1>Contact List<span className="subtitle">Manage and tag your recipients for targeted campaigns</span></h1>
-              </div>
-              <button className="btn-primary" style={{ padding: '0.75rem 1.5rem' }} onClick={() => setImportModalOpen(true)}>
-                <PlusCircle size={20} /> Import Contacts
-              </button>
-            </div>
-            
-            <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '1.25rem', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--card-border)', display: 'flex', gap: '0.75rem' }}>
-                <div style={{ position: 'relative', flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
+              <h1>Contact Management</h1>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ position: 'relative', width: '300px' }}>
                   <input 
                     type="text" 
-                    placeholder="Search by name or number..." 
-                    style={{ paddingLeft: '3rem' }} 
+                    placeholder="Search contacts or tags..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ paddingLeft: '2.5rem' }}
                   />
-                  <List size={20} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  <Users size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                 </div>
-                <select 
-                  style={{ width: '200px' }} 
-                  value={selectedTag}
-                  onChange={(e) => setSelectedTag(e.target.value)}
-                >
-                  <option>All Tags</option>
-                  {Array.from(new Set(contactList.flatMap(c => c.tags))).map(tag => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
+                <button className="btn-primary" onClick={() => setImportModalOpen(true)}>
+                  <Upload size={18} /> Import Contacts
+                </button>
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--card-border)' }}>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Contact</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Age</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Phone</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Tags</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Joined</th>
-                    <th style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedContacts.map((contact) => (
-                    <tr key={contact.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                      <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{contact.name || 'Anonymous'}</td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>{contact.age || '-'}</td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>{contact.phone}</td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          {contact.tags.map((tag: string) => (
-                            <span key={tag} className="badge" style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '0.7rem' }}>{tag}</span>
-                          ))}
-                          {contact.tags.length === 0 && <span style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>No tags</span>}
-                        </div>
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
-                        {new Date(contact.joined).toLocaleDateString()}
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <button 
-                            className="btn-outline" 
-                            style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }}
-                            onClick={() => {
-                              setEditingContact({ ...contact, tags: contact.tags.join(', ') });
-                              setEditModalOpen(true);
-                            }}
-                          >
-                            <Edit size={14} color="#64748b" />
-                          </button>
-                          <button 
-                            className="btn-outline" 
-                            style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #fee2e2' }}
-                            onClick={() => handleDeleteContact(contact.id)}
-                          >
-                            <Trash2 size={14} color="#ef4444" />
-                          </button>
-                        </div>
-                      </td>
+            </div>
+            
+            <div className="glass-card">
+              {isDataLoading ? <Skeleton type="table" /> : (
+                <table style={{ width: '100%' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--card-border)', background: 'var(--bg-elevated)' }}>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Name</th>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Age</th>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Phone</th>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Tags</th>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Joined</th>
+                      <th style={{ padding: '1.25rem 1.5rem' }}>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {paginatedContacts.map((contact) => (
+                      <tr key={contact.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
+                        <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{contact.name || 'Anonymous'}</td>
+                        <td style={{ padding: '1.25rem 1.5rem' }}>{contact.age || '-'}</td>
+                        <td style={{ padding: '1.25rem 1.5rem' }}>{contact.phone}</td>
+                        <td style={{ padding: '1.25rem 1.5rem' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            {contact.tags.map((tag: string) => (
+                              <span key={tag} className="badge" style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '0.7rem' }}>{tag}</span>
+                            ))}
+                            {contact.tags.length === 0 && <span style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>No tags</span>}
+                          </div>
+                        </td>
+                        <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-muted)' }}>
+                          {new Date(contact.joined).toLocaleDateString()}
+                        </td>
+                        <td style={{ padding: '1.25rem 1.5rem' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                              className="btn-outline" 
+                              style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }}
+                              onClick={() => {
+                                setEditingContact({ ...contact, tags: contact.tags.join(', ') });
+                                setEditModalOpen(true);
+                              }}
+                            >
+                              <Edit size={14} color="#64748b" />
+                            </button>
+                            <button 
+                              className="btn-outline" 
+                              style={{ padding: '0.35rem', borderRadius: '0.5rem', border: '1px solid #fee2e2' }}
+                              onClick={() => handleDeleteContact(contact.id)}
+                            >
+                              <Trash2 size={14} color="#ef4444" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
               <div style={{ padding: '1rem 1.5rem', background: 'var(--bg-elevated)', borderTop: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
                   Showing {Math.min((contactsPage - 1) * itemsPerPage + 1, filteredContacts.length)} to {Math.min(contactsPage * itemsPerPage, filteredContacts.length)} of {filteredContacts.length}
