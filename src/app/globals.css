@@ -258,12 +258,14 @@ h3 { font-weight: 600; letter-spacing: -0.01em; color: var(--text-main); }
    ═══════════════════════════════════════ */
 
 .glass-card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-xl);
-  padding: 1.75rem;
-  box-shadow: var(--shadow-sm);
-  transition: var(--transition);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-2xl);
+  padding: 2.25rem;
+  box-shadow: 0 10px 40px -10px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  transition: var(--transition-slow);
 }
 
 @media (max-width: 640px) {
@@ -911,5 +913,57 @@ tr:hover td {
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════
+   PREMIUM CUSTOM DESIGN IMPROVEMENTS
+   ═══════════════════════════════════════ */
+
+.badge-utility {
+  background: rgba(13, 148, 136, 0.08) !important;
+  color: #0f766e !important;
+  border-color: rgba(13, 148, 136, 0.15) !important;
+}
+
+.badge-marketing {
+  background: rgba(139, 92, 246, 0.08) !important;
+  color: #6d28d9 !important;
+  border-color: rgba(139, 92, 246, 0.15) !important;
+}
+
+.badge-authentication {
+  background: rgba(245, 158, 11, 0.08) !important;
+  color: #b45309 !important;
+  border-color: rgba(245, 158, 11, 0.15) !important;
+}
+
+.template-card img {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.template-card:hover img {
+  transform: scale(1.04);
+}
+
+.input-with-icon-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.input-with-icon-wrapper input {
+  padding-left: 2.75rem !important;
+}
+
+.input-with-icon-wrapper svg {
+  position: absolute;
+  left: 0.95rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: var(--transition);
+}
+
+.input-with-icon-wrapper input:focus + svg {
+  color: var(--primary) !important;
 }
 

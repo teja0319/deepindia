@@ -15,6 +15,7 @@ export default function WhatsAppSender() {
   const [campaignName, setCampaignName] = useState('');
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+  const [staticMappings, setStaticMappings] = useState<Record<string, string>>({});
   
   // Real Data States
   const [stats, setStats] = useState({ 
@@ -77,6 +78,10 @@ export default function WhatsAppSender() {
   // Edit Contact State
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<any>(null);
+
+  // Add Contact State
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [newContact, setNewContact] = useState({ name: '', phone: '', age: '', tags: '' });
 
   const fetchCampaignLogs = async (campaign: any) => {
     try {
@@ -193,6 +198,47 @@ export default function WhatsAppSender() {
     }
   };
 
+  const handleAddContact = async () => {
+    if (!newContact.phone) return alert('Phone number is required');
+    
+    setIsLoading(true);
+    try {
+      const tags = newContact.tags
+        ? newContact.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t)
+        : [];
+
+      const payload = {
+        name: newContact.name,
+        phone: newContact.phone.replace(/\D/g, ''),
+        age: newContact.age ? Number(newContact.age) : null,
+        tags: tags
+      };
+
+      const response = await axios.post('/api/contacts', payload);
+      
+      if (response.data.success) {
+        const newlyAdded = {
+          id: response.data.contactId,
+          name: payload.name,
+          phone: payload.phone,
+          age: payload.age,
+          tags: tags,
+          joined: new Date().toISOString()
+        };
+
+        setContactList(prev => [newlyAdded, ...prev]);
+        setAddModalOpen(false);
+        setToast({ message: 'Contact added successfully!', type: 'success' });
+      }
+    } catch (err: any) {
+      console.error('Add contact failed:', err);
+      const msg = err.response?.data?.error || 'Failed to add contact';
+      setToast({ message: msg, type: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const [excelData, setExcelData] = useState<any[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -203,6 +249,15 @@ export default function WhatsAppSender() {
   const [recipientSource, setRecipientSource] = useState<'excel' | 'existing'>('excel');
   const [selectedTagForCampaign, setSelectedTagForCampaign] = useState('All Tags');
   const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
+  const [campaignContactSearch, setCampaignContactSearch] = useState('');
+
+  const filteredCampaignContacts = contactList.filter(c => {
+    const matchesTag = selectedTagForCampaign === 'All Tags' || c.tags.includes(selectedTagForCampaign);
+    const matchesSearch = !campaignContactSearch || 
+      (c.name?.toLowerCase().includes(campaignContactSearch.toLowerCase())) || 
+      c.phone.includes(campaignContactSearch);
+    return matchesTag && matchesSearch;
+  });
 
   useEffect(() => {
     const initFetch = async () => {
@@ -288,7 +343,7 @@ export default function WhatsAppSender() {
   };
 
   const getTemplateVariables = (template: any) => {
-    const variables: { id: string, component: string }[] = [];
+    const variables: { id: string, component: string, type?: string }[] = [];
     template.components.forEach((comp: any) => {
       if (comp.text) {
         const matches = comp.text.match(/{{([^}]+)}}/g);
@@ -301,6 +356,9 @@ export default function WhatsAppSender() {
           });
         }
       }
+      if (comp.type === 'HEADER' && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(comp.format)) {
+        variables.push({ id: 'HEADER_MEDIA', component: 'HEADER', type: comp.format });
+      }
     });
     return variables;
   };
@@ -311,12 +369,36 @@ export default function WhatsAppSender() {
     setStep(4);
     setProgress({ total: excelData.length, current: 0, success: 0, fail: 0 });
 
+    const getParamValue = (vId: string, row: any, type?: string) => {
+      let val = '';
+      if (mapping[vId] === '__STATIC__') {
+        val = staticMappings[vId] || '';
+      } else if (mapping[vId]) {
+        val = String(row[mapping[vId]] || '');
+      }
+
+      // Fallback for media header if empty
+      if (!val && vId === 'HEADER_MEDIA' && type) {
+        const headerComp = selectedTemplate.components.find((c: any) => c.type === 'HEADER');
+        if (headerComp && headerComp.format === type) {
+          if (type === 'IMAGE') {
+            val = headerComp.example?.header_handle?.[0] || '';
+          } else if (type === 'DOCUMENT') {
+            val = headerComp.example?.document_handle?.[0] || '';
+          } else if (type === 'VIDEO') {
+            val = headerComp.example?.video_handle?.[0] || '';
+          }
+        }
+      }
+      return val;
+    };
+
     try {
       for (let i = 0; i < excelData.length; i++) {
         const row = excelData[i];
         const phoneNumber = String(row[mapping['phone']]).replace(/\D/g, '');
-        const contactName = mapping['contact_name'] ? String(row[mapping['contact_name']] || '') : null;
-        const contactAge = mapping['age'] ? Number(row[mapping['age']]) || null : null;
+        const contactName = mapping['contact_name'] && mapping['contact_name'] !== '__STATIC__' ? String(row[mapping['contact_name']] || '') : null;
+        const contactAge = mapping['age'] && mapping['age'] !== '__STATIC__' ? Number(row[mapping['age']]) || null : null;
         
         if (!phoneNumber) {
           setProgress(prev => ({ ...prev, current: i + 1, fail: prev.fail + 1 }));
@@ -325,14 +407,39 @@ export default function WhatsAppSender() {
 
         const templateVars = getTemplateVariables(selectedTemplate);
         const bodyParams = templateVars.filter(v => v.component === 'BODY').map(v => {
-          const param: any = { type: 'text', text: String(row[mapping[v.id]] || '') };
+          const val = getParamValue(v.id, row);
+          const param: any = { type: 'text', text: val };
           if (isNaN(Number(v.id))) param.parameter_name = v.id;
           return param;
         });
         const headerParams = templateVars.filter(v => v.component === 'HEADER').map(v => {
-          const param: any = { type: 'text', text: String(row[mapping[v.id]] || '') };
-          if (isNaN(Number(v.id))) param.parameter_name = v.id;
-          return param;
+          const val = getParamValue(v.id, row, v.type);
+          if (v.id === 'HEADER_MEDIA' && v.type) {
+            const mediaType = v.type.toLowerCase();
+            const param: any = {
+              type: mediaType,
+              [mediaType]: {
+                link: val
+              }
+            };
+            if (mediaType === 'document') {
+              let filename = 'document.pdf';
+              try {
+                const url = new URL(val);
+                const pathname = url.pathname;
+                const base = pathname.substring(pathname.lastIndexOf('/') + 1);
+                if (base && base.includes('.')) {
+                  filename = base;
+                }
+              } catch (e) {}
+              param.document.filename = filename;
+            }
+            return param;
+          } else {
+            const param: any = { type: 'text', text: val };
+            if (isNaN(Number(v.id))) param.parameter_name = v.id;
+            return param;
+          }
         });
 
         const apiComponents = [];
@@ -628,41 +735,148 @@ export default function WhatsAppSender() {
 
         {view === 'create' && (
           <div className="fade-in">
-            <h1>New Campaign<span className="subtitle">Set up and launch a targeted WhatsApp message blast</span></h1>
-            <div className="step-indicator">
-              <div className={`step ${step >= 1 ? 'active' : ''}`}>1. Select Template</div>
-              <div className={`step ${step >= 2 ? 'active' : ''}`}>2. Upload Excel</div>
-              <div className={`step ${step >= 3 ? 'active' : ''}`}>3. Map Variables</div>
-              <div className={`step ${step >= 4 ? 'active' : ''}`}>4. Track Status</div>
+            <h1 style={{ fontSize: '2rem', fontWeight: 800, textAlign: 'center', marginBottom: '0.25rem' }}>
+              Create New Campaign
+              <span className="subtitle" style={{ fontSize: '0.95rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.35rem', fontWeight: 400 }}>
+                Launch a targeted WhatsApp template broadcast in a few simple steps
+              </span>
+            </h1>
+
+            {/* Premium Stepper */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              position: 'relative',
+              maxWidth: '820px',
+              margin: '2.5rem auto 3.5rem auto',
+              padding: '0 1.5rem'
+            }}>
+              {/* Stepper progress track background */}
+              <div style={{
+                position: 'absolute',
+                top: '20px',
+                left: '3rem',
+                right: '3rem',
+                height: '4px',
+                background: '#e2e8f0',
+                borderRadius: '2px',
+                zIndex: 1
+              }}></div>
+              
+              {/* Stepper active progress line */}
+              <div style={{
+                position: 'absolute',
+                top: '20px',
+                left: '3rem',
+                width: `${((step - 1) / 3) * 88}%`,
+                height: '4px',
+                background: 'linear-gradient(90deg, var(--primary), #34d399)',
+                borderRadius: '2px',
+                zIndex: 1,
+                transition: 'width 0.45s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}></div>
+
+              {/* Step Bubbles */}
+              {[
+                { number: 1, label: 'Select Template' },
+                { number: 2, label: 'Upload Excel' },
+                { number: 3, label: 'Map Variables' },
+                { number: 4, label: 'Track Status' }
+              ].map((s) => {
+                const isActive = step === s.number;
+                const isCompleted = step > s.number;
+                return (
+                  <div key={s.number} style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    zIndex: 2,
+                    position: 'relative'
+                  }}>
+                    {/* Bubble */}
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      background: isCompleted ? 'linear-gradient(135deg, var(--primary), #10b981)' : isActive ? 'white' : '#f8fafc',
+                      border: isCompleted ? 'none' : isActive ? '3.5px solid var(--primary)' : '2.5px solid #cbd5e1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: isCompleted ? 'white' : isActive ? 'var(--primary)' : '#94a3b8',
+                      fontWeight: '700',
+                      fontSize: '0.95rem',
+                      boxShadow: isActive ? '0 0 0 5px rgba(37, 211, 102, 0.15), 0 4px 12px rgba(15, 23, 42, 0.08)' : isCompleted ? '0 2px 6px rgba(37, 211, 102, 0.2)' : 'none',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                    }}>
+                      {isCompleted ? '✓' : s.number}
+                    </div>
+                    {/* Label */}
+                    <span style={{
+                      marginTop: '0.75rem',
+                      fontSize: '0.78rem',
+                      fontWeight: isActive || isCompleted ? '700' : '500',
+                      color: isActive ? 'var(--text-main)' : isCompleted ? 'var(--primary-hover)' : 'var(--text-faint)',
+                      textAlign: 'center',
+                      transition: 'color 0.3s ease',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {s.label}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="glass-card">
               {step === 1 && (
                 <div className="fade-in">
-                  <div style={{ marginBottom: '2rem', background: 'var(--bg-elevated)', padding: '1.5rem', borderRadius: 'var(--radius-lg)', border: '1px solid var(--card-border)' }}>
-                    <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <LayoutDashboard size={20} color="var(--primary)" /> 1. Name your Campaign
+                  <div style={{ 
+                    marginBottom: '2.5rem', 
+                    background: 'linear-gradient(145deg, #ffffff, #f8fafc)', 
+                    padding: '2rem', 
+                    borderRadius: 'var(--radius-xl)', 
+                    border: '1px solid rgba(0, 0, 0, 0.05)',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.02)'
+                  }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.65rem', color: 'var(--text-main)' }}>
+                      <LayoutDashboard size={20} color="var(--primary)" /> Name your Campaign
                     </h2>
-                    <div className="" style={{ border: 'none', background: 'transparent', padding: 0 }}>
-                      <label style={{ fontSize: '0.9rem', marginBottom: '0.5rem', display: 'block', fontWeight: 700 }}>
-                        Campaign Name <span style={{ color: 'var(--error)' }}>*</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+                        Campaign Display Name <span style={{ color: 'var(--error)' }}>*</span>
                       </label>
-                      <input 
-                        type="text" 
-                        placeholder="Enter a name to enable the next step..." 
-                        value={campaignName}
-                        onChange={(e) => setCampaignName(e.target.value)}
-                        style={{ background: 'white', border: !campaignName ? '1.5px solid #cbd5e1' : '1.5px solid var(--primary)' }}
-                      />
-                      {!campaignName && <p style={{ fontSize: '0.75rem', color: 'var(--error)', marginTop: '0.5rem' }}>Please enter a name to continue</p>}
+                      <div className="input-with-icon-wrapper" style={{ position: 'relative' }}>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Vaccination Announcement June 2026" 
+                          value={campaignName}
+                          onChange={(e) => setCampaignName(e.target.value)}
+                          style={{ 
+                            background: 'white', 
+                            border: !campaignName ? '1.5px solid #cbd5e1' : '1.5px solid var(--primary)',
+                            paddingLeft: '2.75rem',
+                            height: '52px',
+                            fontSize: '0.95rem',
+                            fontWeight: 500,
+                            borderRadius: 'var(--radius-md)'
+                          }}
+                        />
+                        <Tag size={18} style={{ 
+                          color: !campaignName ? '#94a3b8' : 'var(--primary)',
+                          transition: 'color 0.2s ease'
+                        }} />
+                      </div>
+                      {!campaignName && <p style={{ fontSize: '0.75rem', color: 'var(--error)', marginTop: '0.25rem', fontWeight: 500 }}>Campaign name is required to continue</p>}
                     </div>
                   </div>
 
-                  <div style={{ marginBottom: '2rem' }}>
-                    <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <MessageSquare size={20} color="var(--primary)" /> 2. Select Template
+                  <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <h2 style={{ fontSize: '1.35rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.65rem', color: 'var(--text-main)' }}>
+                      <MessageSquare size={22} color="var(--primary)" /> Select Message Template
                     </h2>
-                    <p style={{ color: 'var(--text-muted)' }}>Select the WhatsApp template you want to use for this campaign.</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Choose an approved template below. This template will define the layout and header format of your campaign.</p>
                   </div>
                   <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
                     {isDataLoading ? (
@@ -673,23 +887,137 @@ export default function WhatsAppSender() {
                       </>
                     ) : (
                       <>
-                        {templates.map((t) => (
-                          <div 
-                            key={t.name} 
-                            className={`glass-card template-card ${selectedTemplate?.name === t.name ? 'active-border' : ''}`}
-                            style={{ cursor: 'pointer', padding: '1.5rem', border: selectedTemplate?.name === t.name ? '2px solid var(--primary)' : '1px solid var(--card-border)' }}
-                            onClick={() => setSelectedTemplate(t)}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                              <span className="badge badge-success">{t.category}</span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.language}</span>
+                        {templates.map((t) => {
+                          const headerComp = t.components.find((c: any) => c.type === 'HEADER');
+                          const imageUrl = headerComp && headerComp.format === 'IMAGE' ? headerComp.example?.header_handle?.[0] : null;
+                          const isSelected = selectedTemplate?.name === t.name;
+                          return (
+                            <div 
+                              key={t.name} 
+                              className={`glass-card template-card ${isSelected ? 'active-border' : ''}`}
+                              style={{ 
+                                cursor: 'pointer', 
+                                padding: '1.5rem', 
+                                border: isSelected ? '2px solid var(--primary)' : '1px solid var(--card-border)',
+                                position: 'relative',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                overflow: 'hidden',
+                                transition: 'var(--transition)'
+                              }}
+                              onClick={() => setSelectedTemplate(t)}
+                            >
+                              {isSelected && (
+                                <div style={{
+                                  position: 'absolute',
+                                  top: '1rem',
+                                  right: '1rem',
+                                  background: 'var(--primary)',
+                                  color: 'white',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  boxShadow: '0 2px 8px rgba(37, 211, 102, 0.4)',
+                                  zIndex: 10
+                                }}>
+                                  <CheckCircle size={14} strokeWidth={3} />
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', paddingRight: isSelected ? '1.5rem' : '0' }}>
+                                <span className={`badge ${
+                                  t.category === 'MARKETING' ? 'badge-marketing' :
+                                  t.category === 'UTILITY' ? 'badge-utility' :
+                                  t.category === 'AUTHENTICATION' ? 'badge-authentication' : 'badge-success'
+                                }`}>{t.category}</span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t.language}</span>
+                              </div>
+                              {imageUrl && (
+                                <div style={{ 
+                                  width: '100%', 
+                                  height: '140px', 
+                                  borderRadius: 'var(--radius-md)', 
+                                  overflow: 'hidden', 
+                                  marginBottom: '1rem',
+                                  background: '#f1f5f9',
+                                  position: 'relative'
+                                }}>
+                                  <img 
+                                    src={imageUrl} 
+                                    alt={t.name} 
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              )}
+                              {headerComp && headerComp.format === 'IMAGE' && !imageUrl && (
+                                <div style={{ 
+                                  width: '100%', 
+                                  height: '140px', 
+                                  borderRadius: 'var(--radius-md)', 
+                                  overflow: 'hidden', 
+                                  marginBottom: '1rem',
+                                  background: 'var(--bg-elevated)',
+                                  border: '1px dashed var(--card-border)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'var(--text-muted)'
+                                }}>
+                                  <Upload size={24} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
+                                  <span style={{ fontSize: '0.75rem' }}>Image Header Template</span>
+                                </div>
+                              )}
+                              {headerComp && headerComp.format === 'VIDEO' && (
+                                <div style={{ 
+                                  width: '100%', 
+                                  height: '140px', 
+                                  borderRadius: 'var(--radius-md)', 
+                                  overflow: 'hidden', 
+                                  marginBottom: '1rem',
+                                  background: 'var(--bg-elevated)',
+                                  border: '1px dashed var(--card-border)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'var(--text-muted)'
+                                }}>
+                                  <ExternalLink size={24} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
+                                  <span style={{ fontSize: '0.75rem' }}>Video Header Template</span>
+                                </div>
+                              )}
+                              {headerComp && headerComp.format === 'DOCUMENT' && (
+                                <div style={{ 
+                                  width: '100%', 
+                                  height: '140px', 
+                                  borderRadius: 'var(--radius-md)', 
+                                  overflow: 'hidden', 
+                                  marginBottom: '1rem',
+                                  background: 'var(--bg-elevated)',
+                                  border: '1px dashed var(--card-border)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'var(--text-muted)'
+                                }}>
+                                  <FileSpreadsheet size={24} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
+                                  <span style={{ fontSize: '0.75rem' }}>Document Header Template</span>
+                                </div>
+                              )}
+                              <h3 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t.name.replace(/_/g, ' ')}</h3>
+                              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                {t.components.find((c: any) => c.type === 'BODY')?.text}
+                              </p>
                             </div>
-                            <h3 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t.name.replace(/_/g, ' ')}</h3>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {t.components.find((c: any) => c.type === 'BODY')?.text}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                         {templates.length === 0 && (
                           <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', background: '#f8fafc', borderRadius: '1.5rem', border: '1px dashed var(--card-border)' }}>
                             <p style={{ color: 'var(--text-muted)' }}>No templates found. Check your WhatsApp Business account.</p>
@@ -748,9 +1076,19 @@ export default function WhatsAppSender() {
                     </label>
                   ) : (
                     <div className="fade-in">
-                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                        <div style={{ position: 'relative', flex: 2, minWidth: '200px' }}>
+                          <input 
+                            type="text" 
+                            placeholder="Search by name or number..." 
+                            value={campaignContactSearch}
+                            onChange={(e) => setCampaignContactSearch(e.target.value)}
+                            style={{ paddingLeft: '2.5rem' }}
+                          />
+                          <Users size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                        </div>
                         <select 
-                          style={{ flex: 1 }} 
+                          style={{ flex: 1, minWidth: '150px' }} 
                           value={selectedTagForCampaign}
                           onChange={(e) => setSelectedTagForCampaign(e.target.value)}
                         >
@@ -760,8 +1098,7 @@ export default function WhatsAppSender() {
                           ))}
                         </select>
                         <button className="btn-outline" onClick={() => {
-                          const filtered = contactList.filter(c => selectedTagForCampaign === 'All Tags' || c.tags.includes(selectedTagForCampaign));
-                          setSelectedContactIds(filtered.map(c => c.id));
+                          setSelectedContactIds(filteredCampaignContacts.map(c => c.id));
                         }}>Select All Filtered</button>
                       </div>
 
@@ -769,9 +1106,7 @@ export default function WhatsAppSender() {
                         {isDataLoading ? <Skeleton type="table" /> : (
                           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <tbody style={{ background: 'white' }}>
-                              {contactList
-                                .filter(c => selectedTagForCampaign === 'All Tags' || c.tags.includes(selectedTagForCampaign))
-                                .map(contact => (
+                              {filteredCampaignContacts.map(contact => (
                                 <tr key={contact.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                   <td style={{ padding: '1rem' }}>
                                     <input 
@@ -859,12 +1194,41 @@ export default function WhatsAppSender() {
                       </div>
                       <div style={{ margin: '2rem 0 1rem 0', fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Template Variables</div>
                       {getTemplateVariables(selectedTemplate).map((v) => (
-                        <div key={v.id} className="mapping-row">
-                          <label>&#123;&#123;{v.id}&#125;&#125; <span style={{ fontWeight: 400, opacity: 0.6, fontSize: '0.8rem' }}>({v.component})</span></label>
-                          <select value={mapping[v.id] || ''} onChange={(e) => setMapping(prev => ({ ...prev, [v.id]: e.target.value }))}>
-                            <option value="">Select Column</option>
-                            {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                          </select>
+                        <div key={v.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1rem' }}>
+                          <div className="mapping-row" style={{ marginBottom: 0 }}>
+                            <label>
+                              {v.id === 'HEADER_MEDIA' ? `Header ${v.type ? v.type.charAt(0) + v.type.slice(1).toLowerCase() : 'Media'}` : `{{${v.id}}}`}
+                              <span style={{ fontWeight: 400, opacity: 0.6, fontSize: '0.8rem', marginLeft: '0.5rem' }}>({v.component})</span>
+                            </label>
+                            <select 
+                              value={mapping[v.id] || ''} 
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setMapping(prev => ({ ...prev, [v.id]: val }));
+                              }}
+                            >
+                              <option value="">Select Column</option>
+                              <option value="__STATIC__">Use Static Value / URL</option>
+                              {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+                          {mapping[v.id] === '__STATIC__' && (
+                            <div style={{ paddingLeft: '0.5rem', borderLeft: '2px solid var(--primary)', marginLeft: '0.5rem' }}>
+                              <input
+                                type="text"
+                                placeholder={v.id === 'HEADER_MEDIA' ? `Enter static ${v.type ? v.type.toLowerCase() : 'media'} URL (e.g., https://...)` : `Enter static text value`}
+                                value={staticMappings[v.id] || ''}
+                                onChange={(e) => setStaticMappings(prev => ({ ...prev, [v.id]: e.target.value }))}
+                                style={{ 
+                                  padding: '0.5rem 0.75rem', 
+                                  fontSize: '0.85rem', 
+                                  width: '100%', 
+                                  borderRadius: 'var(--radius-md)',
+                                  border: '1px solid #cbd5e1'
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -881,14 +1245,92 @@ export default function WhatsAppSender() {
                         <div className="message-container">
                           {selectedTemplate.components.map((comp: any, i: number) => (
                             <div key={i}>
-                              {comp.type === 'HEADER' && <div className="header-text">{comp.text}</div>}
+                              {comp.type === 'HEADER' && (
+                                <div>
+                                  {comp.text && <div className="header-text">{comp.text}</div>}
+                                  {['IMAGE', 'VIDEO', 'DOCUMENT'].includes(comp.format) && (
+                                    <div className="header-media-preview" style={{ 
+                                      background: '#f8fafc', 
+                                      border: '1px dashed #cbd5e1', 
+                                      borderRadius: 'var(--radius-md)', 
+                                      overflow: 'hidden', 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      justifyContent: 'center', 
+                                      minHeight: '140px', 
+                                      marginBottom: '0.75rem',
+                                      position: 'relative'
+                                    }}>
+                                      {(() => {
+                                        const mappedValue = mapping['HEADER_MEDIA'] === '__STATIC__' 
+                                          ? staticMappings['HEADER_MEDIA'] 
+                                          : (excelData[0] && mapping['HEADER_MEDIA'] ? String(excelData[0][mapping['HEADER_MEDIA']] || '') : '');
+
+                                        if (!mappedValue) {
+                                          return (
+                                            <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.8rem', padding: '1rem' }}>
+                                              <Upload size={24} style={{ margin: '0 auto 0.5rem', opacity: 0.6 }} />
+                                              <span>No {comp.format.toLowerCase()} URL provided yet</span>
+                                            </div>
+                                          );
+                                        }
+
+                                        if (comp.format === 'IMAGE') {
+                                          return (
+                                            <img 
+                                              src={mappedValue} 
+                                              alt="Header Preview" 
+                                              style={{ width: '100%', height: '100%', objectFit: 'cover', maxHeight: '180px' }}
+                                              onError={(e) => {
+                                                (e.target as HTMLElement).style.display = 'none';
+                                                const parent = (e.target as HTMLElement).parentElement;
+                                                if (parent && !parent.querySelector('.error-msg')) {
+                                                  const fallback = document.createElement('div');
+                                                  fallback.className = 'error-msg';
+                                                  fallback.style.padding = '1rem';
+                                                  fallback.style.fontSize = '0.8rem';
+                                                  fallback.style.color = '#ef4444';
+                                                  fallback.innerText = 'Invalid Image URL';
+                                                  parent.appendChild(fallback);
+                                                }
+                                              }}
+                                            />
+                                          );
+                                        } else if (comp.format === 'VIDEO') {
+                                          return (
+                                            <video 
+                                              src={mappedValue} 
+                                              controls 
+                                              style={{ width: '100%', maxHeight: '180px' }} 
+                                            />
+                                          );
+                                        } else if (comp.format === 'DOCUMENT') {
+                                          return (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem', color: '#334155' }}>
+                                              <FileSpreadsheet size={24} color="var(--primary)" />
+                                              <span style={{ fontSize: '0.85rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
+                                                {mappedValue.substring(mappedValue.lastIndexOf('/') + 1) || 'document.pdf'}
+                                              </span>
+                                            </div>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               {comp.type === 'BODY' && (
                                 <div className="body-text">
                                   {comp.text?.split(/({{[^}]+}})/).map((part: string, idx: number) => {
                                     const match = part.match(/{{([^}]+)}}/);
                                     if (match) {
                                       const vId = match[1];
-                                      return <span key={idx} className={`variable ${mapping[vId] ? 'mapped' : 'unmapped'}`}>{mapping[vId] ? excelData[0][mapping[vId]] : part}</span>;
+                                      const isMapped = mapping[vId] && mapping[vId] !== '';
+                                      const value = mapping[vId] === '__STATIC__' 
+                                        ? staticMappings[vId] 
+                                        : (excelData[0] && mapping[vId] ? excelData[0][mapping[vId]] : part);
+                                      return <span key={idx} className={`variable ${isMapped ? 'mapped' : 'unmapped'}`}>{isMapped ? value : part}</span>;
                                     }
                                     return part;
                                   })}
@@ -1135,6 +1577,12 @@ export default function WhatsAppSender() {
                   />
                   <Users size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                 </div>
+                <button className="btn-outline" onClick={() => {
+                  setNewContact({ name: '', phone: '', age: '', tags: '' });
+                  setAddModalOpen(true);
+                }}>
+                  <PlusCircle size={18} /> Add Contact
+                </button>
                 <button className="btn-primary" onClick={() => setImportModalOpen(true)}>
                   <Upload size={18} /> Import Contacts
                 </button>
@@ -1340,6 +1788,79 @@ export default function WhatsAppSender() {
                 <button className="btn-outline" style={{ flex: 1 }} onClick={() => setEditModalOpen(false)}>Cancel</button>
                 <button className="btn-primary" style={{ flex: 2 }} onClick={handleUpdateContact} disabled={isLoading}>
                   {isLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {addModalOpen && (
+          <div className="modal-overlay">
+            <div className="glass-card" style={{ width: '100%', maxWidth: '480px', animation: 'fadeIn 0.2s ease-out' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.25rem' }}>Add New Contact</h2>
+                <button onClick={() => setAddModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+              </div>
+              
+              <div style={{ display: 'grid', gap: '1.25rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Full Name</label>
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      type="text" 
+                      value={newContact.name} 
+                      onChange={(e) => setNewContact({...newContact, name: e.target.value})}
+                      placeholder="Contact Name"
+                      style={{ paddingLeft: '2.5rem' }}
+                    />
+                    <Users size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  </div>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Phone Number <span style={{ color: 'var(--error)' }}>*</span></label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type="text" 
+                        value={newContact.phone} 
+                        onChange={(e) => setNewContact({...newContact, phone: e.target.value})}
+                        placeholder="Phone Number"
+                        style={{ paddingLeft: '2.5rem' }}
+                      />
+                      <MessageSquare size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Age</label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type="number" 
+                        value={newContact.age} 
+                        onChange={(e) => setNewContact({...newContact, age: e.target.value})}
+                        placeholder="Age"
+                        style={{ paddingLeft: '2.5rem' }}
+                      />
+                      <Tag size={16} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem', color: '#64748b' }}>Tags (comma separated)</label>
+                  <input 
+                    type="text" 
+                    value={newContact.tags} 
+                    onChange={(e) => setNewContact({...newContact, tags: e.target.value})}
+                    placeholder="e.g. Patient, VIP, 2026"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+                <button className="btn-outline" style={{ flex: 1 }} onClick={() => setAddModalOpen(false)}>Cancel</button>
+                <button className="btn-primary" style={{ flex: 2 }} onClick={handleAddContact} disabled={isLoading}>
+                  {isLoading ? 'Adding...' : 'Add Contact'}
                 </button>
               </div>
             </div>
